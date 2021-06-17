@@ -1,0 +1,104 @@
+import {
+  Directive,
+  ElementRef,
+  EventEmitter,
+  Input,
+  NgZone,
+  OnDestroy,
+  OnInit,
+  Output,
+  Renderer2
+} from '@angular/core';
+
+import { IClipboardResponse } from './interface';
+import { NpmClipboardService } from './npm-clipboard.service'
+@Directive({
+  selector: '[ngxClipboard]'
+})
+export class NpmClipboardDirective {
+
+  @Input('ngxClipboard')
+  public targetElm: HTMLInputElement | HTMLTextAreaElement | undefined | '';
+  @Input()
+  public container: HTMLElement | undefined;
+
+  @Input()
+  public cbContent: string | undefined;
+
+  @Input()
+  public cbSuccessMsg: string | undefined;
+
+  @Output()
+  public cbOnSuccess: EventEmitter<IClipboardResponse> = new EventEmitter<IClipboardResponse>();
+
+  @Output()
+  public cbOnError: EventEmitter<any> = new EventEmitter<any>();
+
+  private clickListener!: () => void;
+
+  constructor(
+      private ngZone: NgZone,
+      private host: ElementRef<HTMLElement>,
+      private renderer: Renderer2,
+      private clipboardSrv: NpmClipboardService
+  ) {}
+
+  // tslint:disable-next-line:no-empty
+  public ngOnInit() {
+      this.ngZone.runOutsideAngular(() => {
+          // By default each host listener schedules change detection and also wrapped
+          // into additional function that calls `markForCheck()`. We're listening the `click`
+          // event in the context of the root zone to avoid running unnecessary change detections,
+          // since this directive doesn't do anything template-related (e.g. updates template variables).
+          this.clickListener = this.renderer.listen(this.host.nativeElement, 'click', this.onClick);
+      });
+  }
+
+  public ngOnDestroy() {
+      this.clickListener();
+      this.clipboardSrv.destroy(this.container);
+  }
+
+  private onClick = (event: MouseEvent): void => {
+      if (!this.clipboardSrv.isSupported) {
+          this.handleResult(false, undefined, event);
+      } else if (this.targetElm && this.clipboardSrv.isTargetValid(this.targetElm)) {
+          this.handleResult(this.clipboardSrv.copyFromInputElement(this.targetElm), this.targetElm.value, event);
+      } else if (this.cbContent) {
+          this.handleResult(this.clipboardSrv.copyFromContent(this.cbContent, this.container), this.cbContent, event);
+      }
+  };
+
+  /**
+   * Fires an event based on the copy operation result.
+   * @param succeeded
+   */
+  private handleResult(succeeded: boolean, copiedContent: string | undefined, event: MouseEvent): void {
+      let response: IClipboardResponse = {
+          isSuccess: succeeded,
+          event
+      };
+
+      if (succeeded) {
+          if (this.cbOnSuccess.observers.length > 0) {
+              response = Object.assign(response, {
+                  content: copiedContent,
+                  successMessage: this.cbSuccessMsg
+              });
+              this.ngZone.run(() => {
+                  this.cbOnSuccess.emit(response);
+              });
+          }
+      } else {
+          if (this.cbOnError.observers.length > 0) {
+              this.ngZone.run(() => {
+                  this.cbOnError.emit(response);
+              });
+          }
+      }
+
+      this.clipboardSrv.pushCopyResponse(response);
+  }
+
+
+}
